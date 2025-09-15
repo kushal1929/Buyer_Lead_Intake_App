@@ -311,6 +311,7 @@ export default function AddLeadModal({ isOpen, onClose, editLead }: AddLeadModal
                         <Input 
                           placeholder="Enter preferred location" 
                           {...field} 
+                          value={field.value || ""}
                           data-testid="input-location"
                         />
                       </FormControl>
@@ -403,6 +404,7 @@ export default function AddLeadModal({ isOpen, onClose, editLead }: AddLeadModal
                           rows={3} 
                           placeholder="Add any additional notes about this lead..." 
                           {...field} 
+                          value={field.value || ""}
                           data-testid="textarea-notes"
                         />
                       </FormControl>

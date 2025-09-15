@@ -61,7 +61,8 @@ export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
 });
 
-export const insertLeadSchema = createInsertSchema(leads).omit({
+// Base schema without refinements for partial operations
+const baseLeadSchema = createInsertSchema(leads).omit({
   id: true,
   userId: true,
   createdAt: true,
@@ -73,7 +74,9 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   phone: z.string().min(10, "Phone number must be at least 10 characters"),
   minBudget: z.number().min(0, "Budget must be positive"),
   maxBudget: z.number().min(0, "Budget must be positive"),
-}).refine((data) => data.maxBudget >= data.minBudget, {
+});
+
+export const insertLeadSchema = baseLeadSchema.refine((data) => data.maxBudget >= data.minBudget, {
   message: "Max budget must be greater than or equal to min budget",
   path: ["maxBudget"],
 }).refine((data) => {
@@ -87,7 +90,7 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   path: ["bhkType"],
 });
 
-export const updateLeadSchema = insertLeadSchema.partial();
+export const updateLeadSchema = baseLeadSchema.partial();
 
 export const insertLeadHistorySchema = createInsertSchema(leadHistory).omit({
   id: true,

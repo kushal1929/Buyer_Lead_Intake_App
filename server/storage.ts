@@ -122,6 +122,7 @@ export class MemStorage implements IStorage {
       ...insertLead,
       id,
       userId,
+      source: insertLead.source || "website",
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
@@ -222,6 +223,7 @@ export class MemStorage implements IStorage {
       ...insertHistory,
       id,
       userId: "system", // In real app, would get from context
+      notes: insertHistory.notes || null,
       createdAt: new Date(),
     };
     this.leadHistory.set(id, history);
