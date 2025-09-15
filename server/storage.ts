@@ -37,6 +37,8 @@ export interface LeadFilters {
   location?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  sortBy?: "createdAt" | "updatedAt" | "lastActivityAt" | "minBudget" | "maxBudget" | "name";
+  sortDirection?: "asc" | "desc";
 }
 
 export interface LeadStats {
@@ -100,7 +102,10 @@ export class MemStorage implements IStorage {
       .filter(lead => lead.userId === userId)
       .filter(lead => this.applyFilters(lead, filters));
 
-    return userLeads.map(lead => ({
+    // Apply sorting
+    const sortedLeads = this.applySort(userLeads, filters);
+
+    return sortedLeads.map(lead => ({
       ...lead,
       initials: this.getInitials(lead.name),
       lastActivityType: this.getLastActivityType(lead.id),
@@ -126,6 +131,8 @@ export class MemStorage implements IStorage {
       status: insertLead.status || "new",
       priority: insertLead.priority || "medium",
       bhkType: insertLead.bhkType || null,
+      preferredLocation: insertLead.preferredLocation || null,
+      notes: insertLead.notes || null,
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
@@ -158,14 +165,9 @@ export class MemStorage implements IStorage {
 
     this.leads.set(id, updatedLead);
 
-    // Add update history
-    await this.addLeadHistory({
-      leadId: id,
-      action: "updated",
-      previousValue: existingLead,
-      newValue: updatedLead,
-      notes: "Lead updated",
-    });
+    // Create field-level history entries
+    const historyPromises = this.createFieldLevelHistory(id, existingLead, updatedLead);
+    await Promise.all(historyPromises);
 
     return updatedLead;
   }
@@ -227,6 +229,7 @@ export class MemStorage implements IStorage {
       id,
       userId: "system", // In real app, would get from context
       notes: insertHistory.notes || null,
+      fieldName: insertHistory.fieldName || null,
       previousValue: insertHistory.previousValue || null,
       newValue: insertHistory.newValue || null,
       createdAt: new Date(),
@@ -285,6 +288,42 @@ export class MemStorage implements IStorage {
     return true;
   }
 
+  private applySort(leads: Lead[], filters?: LeadFilters): Lead[] {
+    if (!filters?.sortBy) {
+      return leads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // Default: newest first
+    }
+
+    const direction = filters.sortDirection === "asc" ? 1 : -1;
+    
+    return [...leads].sort((a, b) => {
+      let aValue: any, bValue: any;
+      
+      switch (filters.sortBy) {
+        case "name":
+          aValue = a.name.toLowerCase();
+          bValue = b.name.toLowerCase();
+          break;
+        case "createdAt":
+        case "updatedAt":
+        case "lastActivityAt":
+          aValue = a[filters.sortBy].getTime();
+          bValue = b[filters.sortBy].getTime();
+          break;
+        case "minBudget":
+        case "maxBudget":
+          aValue = a[filters.sortBy];
+          bValue = b[filters.sortBy];
+          break;
+        default:
+          return 0;
+      }
+      
+      if (aValue < bValue) return -1 * direction;
+      if (aValue > bValue) return 1 * direction;
+      return 0;
+    });
+  }
+
   private getInitials(name: string): string {
     return name
       .split(" ")
@@ -294,8 +333,52 @@ export class MemStorage implements IStorage {
   }
 
   private getLastActivityType(leadId: string): string {
-    const activities = ["Lead created", "Phone call completed", "Email sent", "Meeting scheduled"];
-    return activities[Math.floor(Math.random() * activities.length)];
+    // Get from actual history
+    const history = Array.from(this.leadHistory.values())
+      .filter(h => h.leadId === leadId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    
+    return history.length > 0 ? history[0].action : "created";
+  }
+
+  private createFieldLevelHistory(leadId: string, previousLead: Lead, newLead: Lead): Promise<void>[] {
+    const historyPromises: Promise<void>[] = [];
+    
+    // Check each field for changes and create specific history entries
+    const fieldChecks = [
+      { field: "status", action: "status_changed" as const },
+      { field: "priority", action: "priority_changed" as const },
+      { field: "name", action: "updated" as const },
+      { field: "email", action: "updated" as const },
+      { field: "phone", action: "updated" as const },
+      { field: "propertyType", action: "updated" as const },
+      { field: "bhkType", action: "updated" as const },
+      { field: "preferredLocation", action: "updated" as const },
+      { field: "minBudget", action: "updated" as const },
+      { field: "maxBudget", action: "updated" as const },
+      { field: "source", action: "updated" as const },
+      { field: "notes", action: "note_added" as const }
+    ];
+    
+    fieldChecks.forEach(({ field, action }) => {
+      const prevValue = previousLead[field as keyof Lead];
+      const newValue = newLead[field as keyof Lead];
+      
+      if (prevValue !== newValue) {
+        historyPromises.push(
+          this.addLeadHistory({
+            leadId,
+            action,
+            fieldName: field,
+            previousValue: prevValue,
+            newValue: newValue,
+            notes: `${field} changed from "${prevValue}" to "${newValue}"`
+          }).then(() => {})
+        );
+      }
+    });
+    
+    return historyPromises;
   }
 }
 

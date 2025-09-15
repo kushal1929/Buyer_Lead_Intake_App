@@ -44,11 +44,15 @@ export const leads = pgTable("leads", {
   lastActivityAt: timestamp("last_activity_at").defaultNow().notNull(),
 });
 
+// Enhanced history tracking
+export const historyActionEnum = pgEnum("history_action", ["created", "updated", "status_changed", "priority_changed", "contacted", "deleted", "note_added"]);
+
 export const leadHistory = pgTable("lead_history", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   leadId: varchar("lead_id").references(() => leads.id).notNull(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  action: text("action").notNull(),
+  action: historyActionEnum("action").notNull(),
+  fieldName: text("field_name"), // Which field was changed
   previousValue: jsonb("previous_value"),
   newValue: jsonb("new_value"),
   notes: text("notes"),
