@@ -4,19 +4,43 @@ import { storage } from "./storage";
 import { insertLeadSchema, updateLeadSchema, insertUserSchema } from "@shared/schema";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
+import { createHash } from "crypto";
 
-// Rate limiting middleware
+// Enhanced rate limiting middleware
 const createLeadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20, // limit each IP to 20 requests per windowMs
   message: { error: "Too many lead creation attempts, please try again later." },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 200, // increased limit for general API access
   message: { error: "Too many requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
+
+// Per-user rate limiting for heavy operations
+const perUserLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // limit each user to 30 requests per minute
+  keyGenerator: (req) => {
+    const userId = req.query.userId as string || req.body.userId || 'anonymous';
+    return `user:${userId}`;
+  },
+  message: { error: "Too many requests for this user, please slow down." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ETag helper function
+function generateETag(data: any): string {
+  const hash = createHash('md5').update(JSON.stringify(data)).digest('hex');
+  return `"${hash}"`;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
@@ -62,7 +86,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = parseInt(req.query.limit as string) || 10;
       const search = req.query.search as string;
 
-      // Parse filters
+      // Parse filters with sorting support
       const filters = {
         propertyType: req.query.propertyType as string,
         status: req.query.status as string,
@@ -72,6 +96,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         minBudget: req.query.minBudget ? parseInt(req.query.minBudget as string) : undefined,
         maxBudget: req.query.maxBudget ? parseInt(req.query.maxBudget as string) : undefined,
         location: req.query.location as string,
+        sortBy: req.query.sortBy as "createdAt" | "updatedAt" | "lastActivityAt" | "minBudget" | "maxBudget" | "name",
+        sortDirection: req.query.sortDirection as "asc" | "desc",
+        dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
+        dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
       };
 
       // Remove undefined values
@@ -93,6 +121,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       } else {
         result = await storage.getLeadsWithPagination(userId, page, limit, filters);
+      }
+
+      // Add ETag caching
+      const etag = generateETag(result);
+      res.set('ETag', etag);
+      
+      // Check if client has current version
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
       }
 
       res.json(result);
